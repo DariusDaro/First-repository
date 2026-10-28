@@ -541,7 +541,7 @@
   }
 
   function headlinesCard() {
-    return '<div class="card"><h2>Latest headlines (live)</h2><div id="w-news"></div></div>';
+    return '<div class="card"><h2>Latest headlines (last 2 days)</h2><div id="w-news"></div></div>';
   }
 
   function sourcesCard(s) {
@@ -579,9 +579,42 @@
         style: "2", locale: "en", allow_symbol_change: true, hide_side_toolbar: true,
         studies: ["MASimple@tv-basicstudies"],
         studies_overrides: { "moving average.length": 200 } }, 420);
-    mountWidget("w-news", "embed-widget-timeline.js",
-      { feedMode: "symbol", symbol: s.tv, colorTheme: t, isTransparent: true, displayMode: "regular",
-        width: "100%", height: 450, locale: "en" });
+    loadNews(s);
+  }
+
+  /* Headlines from the last 2 days only (Google News via the free rss2json service). */
+  const NEWS_HOURS = 48;
+  function esc(x) { return String(x).replace(/[&<>"]/g, function (c) { return { "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]; }); }
+  function ago(ms) {
+    const h = Math.floor(ms / 3600000);
+    if (h < 1) return Math.max(1, Math.floor(ms / 60000)) + " min ago";
+    return h < 24 ? h + " h ago" : Math.floor(h / 24) + " d ago";
+  }
+  function loadNews(s) {
+    const box = $("w-news");
+    const sym = $("stock-select").value;
+    box.innerHTML = '<p class="fine">Loading headlines...</p>';
+    const q = s.name.replace(/ \(.*\)/, "") + " " + sym + " stock when:2d";
+    const feed = "https://news.google.com/rss/search?q=" + encodeURIComponent(q) + "&hl=en-US&gl=US&ceid=US:en";
+    const url = "https://api.rss2json.com/v1/api.json?rss_url=" + encodeURIComponent(feed);
+    const link = '<a href="https://news.google.com/search?q=' + encodeURIComponent(q) + '" target="_blank" rel="noopener">Open Google News</a>';
+    fetch(url).then(function (r) { return r.json(); }).then(function (d) {
+      if ($("stock-select").value !== sym) return;           // user already switched stock
+      if (!d || d.status !== "ok") throw new Error("feed error");
+      const now = Date.now();
+      const items = (d.items || []).map(function (i) {
+        return { title: i.title, link: i.link, src: (i.author || ""), time: Date.parse(String(i.pubDate).replace(" ", "T") + "Z") };
+      }).filter(function (i) { return i.time && now - i.time <= NEWS_HOURS * 3600000 && now - i.time >= -3600000; })
+        .sort(function (a, b) { return b.time - a.time; }).slice(0, 12);
+      if (!items.length) { box.innerHTML = '<p class="fine">No headlines found for the last 2 days. ' + link + "</p>"; return; }
+      box.innerHTML = '<ul class="news">' + items.map(function (i) {
+        return '<li><a href="' + esc(i.link) + '" target="_blank" rel="noopener">' + esc(i.title) + '</a> <span class="fine">' +
+               (i.src ? esc(i.src) + " &middot; " : "") + ago(now - i.time) + "</span></li>";
+      }).join("") + "</ul>";
+    }).catch(function () {
+      if ($("stock-select").value !== sym) return;
+      box.innerHTML = '<p class="fine">Could not load headlines (needs internet access). ' + link + "</p>";
+    });
   }
 
   /* =====================================================================
